@@ -13,6 +13,9 @@ export interface Student {
   enrollmentDate: string;
   createdAt: string;
   avatar?: string;
+  remark?: string;
+  courses: string[];
+  courseHours: Record<string, { remaining: number; total: number }>;
 }
 
 export interface Order {
@@ -48,6 +51,7 @@ export interface Refund {
   id: string;
   studentId: string;
   studentName: string;
+  orderId: string;
   course: string;
   amount: number;
   hours: number;

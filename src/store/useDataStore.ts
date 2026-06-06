@@ -16,7 +16,19 @@ interface DataState {
   
   initData: () => void;
   
-  addStudent: (student: Omit<Student, 'id' | 'createdAt'>) => void;
+  addStudent: (student: {
+    name: string;
+    phone: string;
+    age: number;
+    gender: 'male' | 'female';
+    parentName: string;
+    course: string;
+    channel: string;
+    courses?: string[];
+    status?: Student['status'];
+    enrollmentDate?: string;
+    remark?: string;
+  }) => void;
   updateStudent: (id: string, student: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
   getStudentById: (id: string) => Student | undefined;
@@ -42,7 +54,7 @@ interface DataState {
 const initialStudents = generateMockStudents(80);
 const initialOrders = generateMockOrders(initialStudents);
 const initialLessons = generateMockLessons(initialStudents);
-const initialRefunds = generateMockRefunds(initialStudents);
+const initialRefunds = generateMockRefunds(initialStudents, initialOrders);
 
 export const useDataStore = create<DataState>()(
   persist(
@@ -58,14 +70,57 @@ export const useDataStore = create<DataState>()(
 
       initData: () => {
         if (get().initialized) return;
+        
+        const state = get();
+        let needsUpdate = false;
+        const updatedStudents = state.students.map(student => {
+          if (!student.courseHours || !student.courses) {
+            needsUpdate = true;
+            const courses = student.courses || [student.course];
+            const courseHours = student.courseHours || {
+              [student.course]: {
+                remaining: student.remainingHours,
+                total: student.totalHours,
+              },
+            };
+            return { ...student, courses, courseHours };
+          }
+          return student;
+        });
+        
+        const updatedRefunds = state.refunds.map(refund => {
+          if (!refund.orderId) {
+            needsUpdate = true;
+            const studentOrders = state.orders.filter(o => 
+              o.studentId === refund.studentId && o.course === refund.course
+            );
+            return { ...refund, orderId: studentOrders[0]?.id || '' };
+          }
+          return refund;
+        });
+        
+        if (needsUpdate) {
+          set({ students: updatedStudents, refunds: updatedRefunds });
+        }
+        
         set({ initialized: true });
       },
 
       addStudent: (student) => {
+        const courseHours: Record<string, { remaining: number; total: number }> = {};
+        (student.courses || [student.course]).forEach(c => {
+          courseHours[c] = { remaining: 0, total: 0 };
+        });
         const newStudent: Student = {
           ...student,
+          courses: student.courses || [student.course],
+          courseHours,
+          remainingHours: 0,
+          totalHours: 0,
+          status: student.status || 'active',
           id: generateId(),
           createdAt: formatDate(new Date()),
+          enrollmentDate: student.enrollmentDate || formatDate(new Date()),
         };
         set((state) => ({
           students: [newStudent, ...state.students],
@@ -103,10 +158,28 @@ export const useDataStore = create<DataState>()(
         if (order.status === 'paid') {
           const student = get().students.find(s => s.id === order.studentId);
           if (student) {
+            const currentCourseHours = student.courseHours?.[order.course] || { remaining: 0, total: 0 };
+            const newCourseHours = {
+              ...student.courseHours,
+              [order.course]: {
+                remaining: currentCourseHours.remaining + order.hours,
+                total: currentCourseHours.total + order.hours,
+              },
+            };
+            
+            const newCourses = student.courses?.includes(order.course) 
+              ? student.courses 
+              : [...(student.courses || []), order.course];
+            
+            const allRemaining = Object.values(newCourseHours).reduce((sum, ch) => sum + ch.remaining, 0);
+            const allTotal = Object.values(newCourseHours).reduce((sum, ch) => sum + ch.total, 0);
+            
             get().updateStudent(order.studentId, {
-              remainingHours: student.remainingHours + order.hours,
-              totalHours: student.totalHours + order.hours,
+              remainingHours: allRemaining,
+              totalHours: allTotal,
               status: 'active',
+              courseHours: newCourseHours,
+              courses: newCourses,
             });
           }
         }
@@ -141,9 +214,21 @@ export const useDataStore = create<DataState>()(
         }));
         
         const student = get().students.find(s => s.id === lesson.studentId);
-        if (student) {
+        if (student && student.courseHours?.[lesson.course]) {
+          const currentCourseHours = student.courseHours[lesson.course];
+          const newCourseHours = {
+            ...student.courseHours,
+            [lesson.course]: {
+              ...currentCourseHours,
+              remaining: Math.max(0, currentCourseHours.remaining - lesson.hours),
+            },
+          };
+          
+          const allRemaining = Object.values(newCourseHours).reduce((sum, ch) => sum + ch.remaining, 0);
+          
           get().updateStudent(lesson.studentId, {
-            remainingHours: Math.max(0, student.remainingHours - lesson.hours),
+            remainingHours: allRemaining,
+            courseHours: newCourseHours,
           });
         }
       },
@@ -185,12 +270,24 @@ export const useDataStore = create<DataState>()(
           refunds: [newRefund, ...state.refunds],
         }));
         
-        if (refund.status === 'completed') {
+        if (refund.status === 'completed' || refund.status === 'approved') {
           const student = get().students.find(s => s.id === refund.studentId);
-          if (student) {
+          if (student && student.courseHours?.[refund.course]) {
+            const currentCourseHours = student.courseHours[refund.course];
+            const newRemaining = Math.max(0, currentCourseHours.remaining - refund.hours);
+            const newCourseHours = {
+              ...student.courseHours,
+              [refund.course]: {
+                ...currentCourseHours,
+                remaining: newRemaining,
+              },
+            };
+            
+            const allRemaining = Object.values(newCourseHours).reduce((sum, ch) => sum + ch.remaining, 0);
+            
             get().updateStudent(refund.studentId, {
-              status: 'refunded',
-              remainingHours: 0,
+              remainingHours: allRemaining,
+              courseHours: newCourseHours,
             });
           }
         }
@@ -231,7 +328,7 @@ export const useDataStore = create<DataState>()(
         const students = generateMockStudents(80);
         const orders = generateMockOrders(students);
         const lessons = generateMockLessons(students);
-        const refunds = generateMockRefunds(students);
+        const refunds = generateMockRefunds(students, orders);
         set({
           students,
           orders,

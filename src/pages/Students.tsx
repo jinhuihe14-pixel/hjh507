@@ -1,17 +1,28 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Plus, Filter, MoreHorizontal, Eye, Edit, Trash2, User, UserPlus } from 'lucide-react';
+import { Search, Plus, Filter, MoreHorizontal, Eye, Edit, Trash2, User, UserPlus, X } from 'lucide-react';
 import { useDataStore } from '@/store/useDataStore';
 import { formatDate, getStatusText, getStatusColor, cn } from '@/utils';
 import { COURSE_LIST, CHANNEL_LIST } from '@/types';
 
 export default function Students() {
-  const { students, deleteStudent } = useDataStore();
+  const { students, addStudent, deleteStudent } = useDataStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCourse, setFilterCourse] = useState('');
   const [filterChannel, setFilterChannel] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    phone: '',
+    age: '',
+    gender: 'male' as 'male' | 'female',
+    parentName: '',
+    courses: [] as string[],
+    channel: '',
+    remark: '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const filteredStudents = useMemo(() => {
     return students.filter((student) => {
@@ -34,6 +45,89 @@ export default function Students() {
   const handleDelete = (id: string, name: string) => {
     if (confirm(`确定要删除学员 ${name} 吗？`)) {
       deleteStudent(id);
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.name.trim()) {
+      newErrors.name = '请输入学员姓名';
+    }
+
+    if (!formData.phone.trim()) {
+      newErrors.phone = '请输入联系电话';
+    } else if (!/^1\d{10}$/.test(formData.phone)) {
+      newErrors.phone = '请输入正确的11位手机号码';
+    } else if (students.some(s => s.phone === formData.phone)) {
+      newErrors.phone = '该手机号已被注册';
+    }
+
+    if (!formData.age || parseInt(formData.age) <= 0) {
+      newErrors.age = '请输入有效年龄';
+    }
+
+    if (formData.courses.length === 0) {
+      newErrors.courses = '请至少选择一门课程';
+    }
+
+    if (!formData.channel) {
+      newErrors.channel = '请选择渠道来源';
+    }
+
+    if (!formData.parentName.trim()) {
+      newErrors.parentName = '请输入家长姓名';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = () => {
+    if (!validateForm()) return;
+
+    addStudent({
+      name: formData.name.trim(),
+      phone: formData.phone.trim(),
+      age: parseInt(formData.age),
+      gender: formData.gender,
+      parentName: formData.parentName.trim(),
+      course: formData.courses[0],
+      courses: formData.courses,
+      channel: formData.channel,
+      remark: formData.remark.trim(),
+    });
+
+    setShowAddModal(false);
+    setFormData({
+      name: '',
+      phone: '',
+      age: '',
+      gender: 'male',
+      parentName: '',
+      courses: [],
+      channel: '',
+      remark: '',
+    });
+    setErrors({});
+  };
+
+  const toggleCourse = (course: string) => {
+    setFormData(prev => ({
+      ...prev,
+      courses: prev.courses.includes(course)
+        ? prev.courses.filter(c => c !== course)
+        : [...prev.courses, course]
+    }));
+    if (errors.courses) {
+      setErrors(prev => ({ ...prev, courses: '' }));
+    }
+  };
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
 
@@ -213,6 +307,153 @@ export default function Students() {
           共 {filteredStudents.length} 名学员
         </p>
       </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800">新增学员</h3>
+              <button
+                onClick={() => { setShowAddModal(false); setErrors({}); }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">学员姓名 <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    placeholder="请输入学员姓名"
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
+                      errors.name ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                  />
+                  {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">年龄 <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    value={formData.age}
+                    onChange={(e) => handleInputChange('age', e.target.value)}
+                    placeholder="请输入年龄"
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
+                      errors.age ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                  />
+                  {errors.age && <p className="text-xs text-red-500 mt-1">{errors.age}</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">联系电话 <span className="text-red-500">*</span></label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => handleInputChange('phone', e.target.value)}
+                  placeholder="请输入11位手机号码"
+                  maxLength={11}
+                  className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
+                    errors.phone ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                />
+                {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">家长姓名 <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={formData.parentName}
+                    onChange={(e) => handleInputChange('parentName', e.target.value)}
+                    placeholder="请输入家长姓名"
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
+                      errors.parentName ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                  />
+                  {errors.parentName && <p className="text-xs text-red-500 mt-1">{errors.parentName}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">性别</label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => handleInputChange('gender', e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="male">男</option>
+                    <option value="female">女</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">课程选择 <span className="text-red-500">*</span></label>
+                <div className="flex flex-wrap gap-2">
+                  {COURSE_LIST.map((course) => (
+                    <button
+                      key={course}
+                      type="button"
+                      onClick={() => toggleCourse(course)}
+                      className={cn('px-4 py-2 rounded-lg text-sm font-medium transition-all border',
+                        formData.courses.includes(course)
+                          ? 'bg-orange-500 text-white border-orange-500'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300')}
+                    >
+                      {course}
+                    </button>
+                  ))}
+                </div>
+                {errors.courses && <p className="text-xs text-red-500 mt-1">{errors.courses}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">渠道来源 <span className="text-red-500">*</span></label>
+                <select
+                  value={formData.channel}
+                  onChange={(e) => handleInputChange('channel', e.target.value)}
+                  className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                    errors.channel ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                >
+                  <option value="">请选择渠道</option>
+                  {CHANNEL_LIST.map((channel) => (
+                    <option key={channel} value={channel}>{channel}</option>
+                  ))}
+                </select>
+                {errors.channel && <p className="text-xs text-red-500 mt-1">{errors.channel}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                <textarea
+                  value={formData.remark}
+                  onChange={(e) => handleInputChange('remark', e.target.value)}
+                  placeholder="请输入备注信息（选填）"
+                  rows={3}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-100">
+              <button
+                onClick={() => { setShowAddModal(false); setErrors({}); }}
+                className="px-5 py-2.5 border border-gray-200 text-gray-600 rounded-xl font-medium hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSubmit}
+                className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-medium shadow-lg shadow-orange-500/25 hover:shadow-xl transition-all"
+              >
+                确认提交
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

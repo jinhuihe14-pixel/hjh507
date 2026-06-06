@@ -51,9 +51,6 @@ export default function StudentDetail() {
               </p>
               <div className="flex items-center gap-4 mt-3">
                 <span className="px-3 py-1 bg-white/20 rounded-full text-sm">
-                  {student.course}
-                </span>
-                <span className="px-3 py-1 bg-white/20 rounded-full text-sm">
                   {student.channel}
                 </span>
                 <span className={cn(
@@ -67,13 +64,29 @@ export default function StudentDetail() {
           </div>
 
           <div className="text-right">
-            <p className="text-white/80 text-sm">剩余课时</p>
+            <p className="text-white/80 text-sm">总剩余课时</p>
             <p className="text-4xl font-bold mt-1">{student.remainingHours}</p>
             <p className="text-white/60 text-sm mt-1">
               已消耗 {consumedHours} / 总 {student.totalHours} 课时
             </p>
           </div>
         </div>
+
+        {student.courseHours && Object.keys(student.courseHours).length > 0 && (
+          <div className="mt-6 pt-5 border-t border-white/20">
+            <p className="text-white/80 text-sm mb-3">各课程课时</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {Object.entries(student.courseHours).map(([course, hours]) => (
+                <div key={course} className="bg-white/10 backdrop-blur-sm rounded-xl p-3">
+                  <p className="text-white/80 text-xs mb-1">{course}</p>
+                  <p className="text-lg font-semibold">
+                    剩余 {hours.remaining} <span className="text-white/60 text-sm font-normal">/ 总 {hours.total}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

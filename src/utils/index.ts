@@ -94,7 +94,7 @@ export const getMonthsBetween = (startDate: string, endDate: string): string[] =
 
 export const isPeakSeason = (month: string): boolean => {
   const m = parseInt(month.split('-')[1]);
-  return m === '01' || m === '02' || m === '07' || m === '08';
+  return m === 1 || m === 2 || m === 7 || m === 8;
 };
 
 export const getSeasonLabel = (month: string): string => {

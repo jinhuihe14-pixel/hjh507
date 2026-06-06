@@ -18,7 +18,6 @@ const generatePhone = (): string => {
 
 const courses = ['美术', '舞蹈', '口才'];
 const channels = ['短视频', '地推', '老客转介绍'];
-const teachers = ['李老师', '王老师', '张老师', '刘老师', '陈老师', '杨老师'];
 
 export const generateMockStudents = (count: number = 80): Student[] => {
   const students: Student[] = [];
@@ -31,6 +30,28 @@ export const generateMockStudents = (count: number = 80): Student[] => {
     const enrollmentDate = randomDate(startDate, endDate);
     const totalHours = getRandomInt(20, 100);
     const consumedHours = getRandomInt(0, totalHours);
+    const remainingHours = totalHours - consumedHours;
+    
+    const courseHours: Record<string, { remaining: number; total: number }> = {
+      [course]: { remaining: remainingHours, total: totalHours },
+    };
+    
+    const hasSecondCourse = Math.random() > 0.7;
+    const studentCourses = [course];
+    let allRemainingHours = remainingHours;
+    let allTotalHours = totalHours;
+    
+    if (hasSecondCourse) {
+      const otherCourses = courses.filter(c => c !== course);
+      const secondCourse = getRandomItem(otherCourses);
+      const secondTotal = getRandomInt(10, 40);
+      const secondConsumed = getRandomInt(0, secondTotal);
+      const secondRemaining = secondTotal - secondConsumed;
+      studentCourses.push(secondCourse);
+      courseHours[secondCourse] = { remaining: secondRemaining, total: secondTotal };
+      allRemainingHours += secondRemaining;
+      allTotalHours += secondTotal;
+    }
     
     students.push({
       id: generateId(),
@@ -40,12 +61,15 @@ export const generateMockStudents = (count: number = 80): Student[] => {
       phone: generatePhone(),
       parentName: generateParentName(),
       course,
+      courses: studentCourses,
+      courseHours,
       channel,
       status: getRandomItem(['active', 'active', 'active', 'paused', 'finished', 'refunded']),
-      remainingHours: totalHours - consumedHours,
-      totalHours,
+      remainingHours: allRemainingHours,
+      totalHours: allTotalHours,
       enrollmentDate: formatDate(enrollmentDate),
       createdAt: formatDate(enrollmentDate),
+      remark: '',
     });
   }
 
@@ -128,14 +152,17 @@ export const generateMockLessons = (students: Student[]): LessonRecord[] => {
   return lessons.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
-export const generateMockRefunds = (students: Student[]): Refund[] => {
+export const generateMockRefunds = (students: Student[], orders: Order[]): Refund[] => {
   const refunds: Refund[] = [];
   const refundedStudents = students.filter(s => s.status === 'refunded');
 
   refundedStudents.forEach(student => {
-    const refundHours = getRandomInt(5, student.totalHours);
-    const pricePerHour = student.course === '舞蹈' ? 150 : student.course === '美术' ? 120 : 100;
-    const amount = refundHours * pricePerHour;
+    const studentOrders = orders.filter(o => o.studentId === student.id && o.status === 'paid');
+    if (studentOrders.length === 0) return;
+    
+    const order = studentOrders[0];
+    const refundHours = getRandomInt(5, order.hours);
+    const amount = (refundHours / order.hours) * order.amount;
     const refundDate = randomDate(new Date(student.enrollmentDate), new Date());
 
     const reasonCategories = [
@@ -152,8 +179,9 @@ export const generateMockRefunds = (students: Student[]): Refund[] => {
       id: generateId(),
       studentId: student.id,
       studentName: student.name,
+      orderId: order.id,
       course: student.course,
-      amount,
+      amount: Math.round(amount),
       hours: refundHours,
       reason: reasonCategory + '：' + getRandomItem(['学员不适应课程节奏', '家长工作忙没时间接送', '搬家后距离太远', '孩子兴趣转移', '教学效果未达预期', '与其他课程时间冲突']),
       reasonCategory,
