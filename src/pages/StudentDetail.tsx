@@ -1,11 +1,146 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Phone, Calendar, BookOpen, Clock, DollarSign, Undo2, User } from 'lucide-react';
+import { ArrowLeft, Phone, Calendar, BookOpen, Clock, DollarSign, Undo2, User, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDataStore } from '@/store/useDataStore';
 import { formatDate, formatMoney, getStatusText, getStatusColor, cn } from '@/utils';
 
+const COURSE_COLORS: Record<string, string> = {
+  '美术': '#FF7A45',
+  '舞蹈': '#48BB78',
+  '口才': '#4299E1',
+};
+
+function CircularProgress({ 
+  consumed, total, color, size = 100, strokeWidth = 8 }: {
+  consumed: number;
+  total: number;
+  color: string;
+  size?: number;
+  strokeWidth?: number;
+}) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const percentage = total > 0 ? (consumed / total) * 100 : 0;
+  const offset = circumference - (percentage / 100) * circumference;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#e5e7eb"
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          className="transition-all duration-700 ease-out"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-lg font-bold text-gray-800">{Math.round(percentage)}%</span>
+        <span className="text-xs text-gray-500">已消耗</span>
+      </div>
+    </div>
+  );
+}
+
+function CourseLessonTimeline({ 
+  course, 
+  lessons, 
+  color 
+}: { 
+  course: string; 
+  lessons: any[];
+  color: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const displayLessons = expanded ? lessons : lessons.slice(0, 10);
+  const hasMore = lessons.length > 10;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+      <div className="p-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-5 rounded-full" style={{ backgroundColor: color }} />
+          <h4 className="font-semibold text-gray-800">{course}</h4>
+          <span className="text-xs text-gray-400 ml-auto">共 {lessons.length} 条记录</span>
+        </div>
+      </div>
+      
+      <div className="max-h-80 overflow-y-auto">
+        {lessons.length > 0 ? (
+          <div className="relative py-2">
+            <div 
+              className="absolute left-6 top-2 bottom-2 w-0.5 bg-gray-100"
+              style={{ marginLeft: 0 }}
+            />
+            <div className="space-y-0">
+              {displayLessons.map((lesson, index) => (
+                <div key={lesson.id} className="relative pl-14 pr-4 py-3 hover:bg-gray-50">
+                  <div 
+                    className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-md"
+                    style={{ backgroundColor: color }}
+                  />
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium text-gray-800 text-sm">{lesson.content}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {lesson.teacher} · {lesson.startTime}-{lesson.endTime}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-medium" style={{ color }}>-{lesson.hours} 课时</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(lesson.date)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-gray-400">
+            <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">暂无上课记录</p>
+          </div>
+        )}
+      </div>
+      
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full py-3 border-t border-gray-100 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="w-4 h-4" />
+              收起
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-4 h-4" />
+              查看全部
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function StudentDetail() {
   const { id } = useParams<{ id: string }>();
-  const { getStudentById, getOrdersByStudentId, getLessonsByStudentId, getRefundsByStudentId } = useDataStore();
+  const { getStudentById, getOrdersByStudentId, getLessonsByStudentId, getLessonsByStudentIdAndCourse, getRefundsByStudentId } = useDataStore();
   
   const student = getStudentById(id!);
   const orders = getOrdersByStudentId(id!);
@@ -27,6 +162,8 @@ export default function StudentDetail() {
   const totalPaid = orders.filter(o => o.status === 'paid').reduce((sum, o) => sum + o.amount, 0);
   const totalRefunded = refunds.filter(r => r.status === 'completed').reduce((sum, r) => sum + r.amount, 0);
   const consumedHours = student.totalHours - student.remainingHours;
+
+  const courseEntries = student.courseHours ? Object.entries(student.courseHours) : [];
 
   return (
     <div className="space-y-6">
@@ -71,23 +208,52 @@ export default function StudentDetail() {
             </p>
           </div>
         </div>
-
-        {student.courseHours && Object.keys(student.courseHours).length > 0 && (
-          <div className="mt-6 pt-5 border-t border-white/20">
-            <p className="text-white/80 text-sm mb-3">各课程课时</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {Object.entries(student.courseHours).map(([course, hours]) => (
-                <div key={course} className="bg-white/10 backdrop-blur-sm rounded-xl p-3">
-                  <p className="text-white/80 text-xs mb-1">{course}</p>
-                  <p className="text-lg font-semibold">
-                    剩余 {hours.remaining} <span className="text-white/60 text-sm font-normal">/ 总 {hours.total}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
+
+      {courseEntries.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-md p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <BookOpen className="w-5 h-5 text-orange-500" />
+            <h3 className="font-semibold text-gray-800">课时进度</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {courseEntries.map(([course, hours]) => {
+              const color = COURSE_COLORS[course] || '#FF7A45';
+              const courseLessons = getLessonsByStudentIdAndCourse(student.id, course);
+              const consumed = hours.total - hours.remaining;
+              
+              return (
+                <div key={course} className="flex items-center gap-5 p-4 rounded-xl bg-gray-50 hover:bg-gray-100/50 transition-colors">
+                  <CircularProgress 
+                    consumed={consumed} 
+                    total={hours.total} 
+                    color={color}
+                    size={80}
+                    strokeWidth={7}
+                  />
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-800">{course}</h4>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">剩余</span>
+                        <span className="font-medium text-gray-700">{hours.remaining} 课时</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">已消耗</span>
+                        <span className="font-medium" style={{ color }}>{consumed} 课时</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">总计</span>
+                        <span className="font-medium text-gray-700">{hours.total} 课时</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl shadow-md p-6">
@@ -148,12 +314,35 @@ export default function StudentDetail() {
         </div>
       </div>
 
+      {courseEntries.length > 0 && (
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <Clock className="w-5 h-5 text-blue-500" />
+            <h3 className="font-semibold text-gray-800">上课记录</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {courseEntries.map(([course]) => {
+              const color = COURSE_COLORS[course] || '#FF7A45';
+              const courseLessons = getLessonsByStudentIdAndCourse(student.id, course);
+              return (
+                <CourseLessonTimeline
+                  key={course}
+                  course={course}
+                  lessons={courseLessons}
+                  color={color}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-md overflow-hidden">
         <div className="p-6 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <BookOpen className="w-5 h-5 text-orange-500" />
-            <h3 className="font-semibold text-gray-800">缴费记录</h3>
-          </div>
+          <BookOpen className="w-5 h-5 text-orange-500" />
+          <h3 className="font-semibold text-gray-800">缴费记录</h3>
+        </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -188,42 +377,6 @@ export default function StudentDetail() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-          <div className="p-6 border-b border-gray-100">
-            <div className="flex items-center gap-3">
-              <Clock className="w-5 h-5 text-blue-500" />
-              <h3 className="font-semibold text-gray-800">课时记录</h3>
-            </div>
-          </div>
-          <div className="max-h-96 overflow-y-auto">
-            {lessons.length > 0 ? (
-              <div className="divide-y divide-gray-50">
-                {lessons.slice(0, 10).map((lesson) => (
-                  <div key={lesson.id} className="p-4 hover:bg-gray-50">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-gray-800">{lesson.content}</p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          {lesson.teacher} · {lesson.startTime}-{lesson.endTime}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium text-orange-500">-{lesson.hours} 课时</p>
-                        <p className="text-xs text-gray-400 mt-1">{formatDate(lesson.date)}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-8 text-center text-gray-400">
-                <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>暂无课时记录</p>
-              </div>
-            )}
-          </div>
-        </div>
-
         <div className="bg-white rounded-2xl shadow-md overflow-hidden">
           <div className="p-6 border-b border-gray-100">
             <div className="flex items-center gap-3">

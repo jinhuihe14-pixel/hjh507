@@ -39,9 +39,11 @@ interface DataState {
   getOrdersByStudentId: (studentId: string) => Order[];
   
   addLesson: (lesson: Omit<LessonRecord, 'id' | 'createdAt'>) => void;
+  batchAddLessons: (lessons: Omit<LessonRecord, 'id' | 'createdAt'>[]) => void;
   updateLesson: (id: string, lesson: Partial<LessonRecord>) => void;
   deleteLesson: (id: string) => void;
   getLessonsByStudentId: (studentId: string) => LessonRecord[];
+  getLessonsByStudentIdAndCourse: (studentId: string, course: string) => LessonRecord[];
   
   addRefund: (refund: Omit<Refund, 'id' | 'createdAt'>) => void;
   updateRefund: (id: string, refund: Partial<Refund>) => void;
@@ -233,6 +235,44 @@ export const useDataStore = create<DataState>()(
         }
       },
 
+      batchAddLessons: (lessons) => {
+        const newLessons = lessons.map(lesson => ({
+          ...lesson,
+          id: generateId(),
+          createdAt: formatDate(new Date()),
+        }));
+        set((state) => ({
+          lessons: [...newLessons, ...state.lessons],
+        }));
+
+        const studentUpdates: Record<string, { courseHours: Record<string, { remaining: number; total: number }>; remainingHours: number }> = {};
+
+        newLessons.forEach(lesson => {
+          const student = get().students.find(s => s.id === lesson.studentId);
+          if (student && student.courseHours?.[lesson.course]) {
+            if (!studentUpdates[student.id]) {
+              studentUpdates[student.id] = {
+                courseHours: { ...student.courseHours },
+                remainingHours: student.remainingHours,
+              };
+            }
+            const current = studentUpdates[student.id].courseHours[lesson.course];
+            studentUpdates[student.id].courseHours[lesson.course] = {
+              ...current,
+              remaining: Math.max(0, current.remaining - lesson.hours),
+            };
+          }
+        });
+
+        Object.entries(studentUpdates).forEach(([studentId, update]) => {
+          const allRemaining = Object.values(update.courseHours).reduce((sum, ch) => sum + ch.remaining, 0);
+          get().updateStudent(studentId, {
+            remainingHours: allRemaining,
+            courseHours: update.courseHours,
+          });
+        });
+      },
+
       updateLesson: (id, lesson) => {
         set((state) => ({
           lessons: state.lessons.map((l) =>
@@ -258,6 +298,10 @@ export const useDataStore = create<DataState>()(
 
       getLessonsByStudentId: (studentId) => {
         return get().lessons.filter((l) => l.studentId === studentId);
+      },
+
+      getLessonsByStudentIdAndCourse: (studentId, course) => {
+        return get().lessons.filter((l) => l.studentId === studentId && l.course === course);
       },
 
       addRefund: (refund) => {

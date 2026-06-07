@@ -1,16 +1,18 @@
 import { useState, useMemo } from 'react';
-import { Search, Plus, Filter, Clock, Calendar, User, X } from 'lucide-react';
+import { Search, Plus, Filter, Clock, Calendar, User, X, CheckSquare, Square, Users, Layers } from 'lucide-react';
 import { useDataStore } from '@/store/useDataStore';
 import { formatDate, cn } from '@/utils';
 import { COURSE_LIST } from '@/types';
+import StatCard from '@/components/StatCard';
 
 export default function Lessons() {
-  const { lessons, teachers, students, addLesson } = useDataStore();
+  const { lessons, teachers, students, addLesson, batchAddLessons } = useDataStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCourse, setFilterCourse] = useState('');
   const [filterTeacher, setFilterTeacher] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [formData, setFormData] = useState({
     studentId: '',
     course: '',
@@ -20,6 +22,15 @@ export default function Lessons() {
     content: '',
     startTime: '09:00',
   });
+  const [batchFormData, setBatchFormData] = useState({
+    course: '',
+    date: formatDate(new Date()),
+    hours: '1',
+    teacher: '',
+    content: '',
+    startTime: '09:00',
+  });
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const filteredLessons = useMemo(() => {
@@ -75,11 +86,36 @@ export default function Lessons() {
   }, [selectedStudent, formData.course]);
 
   const courseTeachers = useMemo(() => {
-    if (!formData.course) return activeTeachers;
-    return activeTeachers.filter(t => t.course === formData.course);
-  }, [activeTeachers, formData.course]);
+    const course = mode === 'batch' ? batchFormData.course : formData.course;
+    if (!course) return activeTeachers;
+    return activeTeachers.filter(t => t.course === course);
+  }, [activeTeachers, mode, formData.course, batchFormData.course]);
 
-  const validateForm = (): boolean => {
+  const batchStudents = useMemo(() => {
+    if (!batchFormData.course) return [];
+    return students.filter(s => 
+      s.status === 'active' && 
+      s.courseHours?.[batchFormData.course]?.remaining > 0
+    ).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  }, [students, batchFormData.course]);
+
+  const toggleStudent = (studentId: string) => {
+    setSelectedStudentIds(prev => 
+      prev.includes(studentId)
+        ? prev.filter(id => id !== studentId)
+        : [...prev, studentId]
+    );
+  };
+
+  const selectAllStudents = () => {
+    if (selectedStudentIds.length === batchStudents.length) {
+      setSelectedStudentIds([]);
+    } else {
+      setSelectedStudentIds(batchStudents.map(s => s.id));
+    }
+  };
+
+  const validateSingleForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (!formData.studentId) {
@@ -104,29 +140,84 @@ export default function Lessons() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const validateBatchForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!batchFormData.course) {
+      newErrors.course = '请选择课程';
+    }
+    if (!batchFormData.date) {
+      newErrors.date = '请选择上课日期';
+    }
+    if (!batchFormData.hours || parseInt(batchFormData.hours) <= 0) {
+      newErrors.hours = '请输入有效课时数';
+    }
+    if (selectedStudentIds.length === 0) {
+      newErrors.students = '请至少选择一名学员';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSubmit = () => {
-    if (!validateForm() || !selectedStudent) return;
+    if (mode === 'single') {
+      if (!validateSingleForm() || !selectedStudent) return;
 
-    const hoursNum = parseInt(formData.hours);
-    const startHour = parseInt(formData.startTime.split(':')[0]);
-    const endHour = startHour + hoursNum;
+      const hoursNum = parseInt(formData.hours);
+      const startHour = parseInt(formData.startTime.split(':')[0]);
+      const endHour = startHour + hoursNum;
 
-    const selectedTeacher = courseTeachers.find(t => t.name === formData.teacher) || courseTeachers[0];
+      const selectedTeacher = courseTeachers.find(t => t.name === formData.teacher) || courseTeachers[0];
 
-    addLesson({
-      studentId: formData.studentId,
-      studentName: selectedStudent.name,
-      course: formData.course,
-      teacher: selectedTeacher?.name || '李老师',
-      teacherId: selectedTeacher?.id || 't1',
-      hours: hoursNum,
-      content: formData.content || '常规课程',
-      date: formData.date,
-      startTime: formData.startTime,
-      endTime: `${endHour}:00`,
-    });
+      addLesson({
+        studentId: formData.studentId,
+        studentName: selectedStudent.name,
+        course: formData.course,
+        teacher: selectedTeacher?.name || '李老师',
+        teacherId: selectedTeacher?.id || 't1',
+        hours: hoursNum,
+        content: formData.content || '常规课程',
+        date: formData.date,
+        startTime: formData.startTime,
+        endTime: `${endHour}:00`,
+      });
 
-    setShowAddModal(false);
+      setShowAddModal(false);
+      resetForm();
+    } else {
+      if (!validateBatchForm()) return;
+
+      const hoursNum = parseInt(batchFormData.hours);
+      const startHour = parseInt(batchFormData.startTime.split(':')[0]);
+      const endHour = startHour + hoursNum;
+
+      const selectedTeacher = courseTeachers.find(t => t.name === batchFormData.teacher) || courseTeachers[0];
+
+      const lessonData = selectedStudentIds.map(studentId => {
+        const student = students.find(s => s.id === studentId)!;
+        return {
+          studentId,
+          studentName: student.name,
+          course: batchFormData.course,
+          teacher: selectedTeacher?.name || '李老师',
+          teacherId: selectedTeacher?.id || 't1',
+          hours: hoursNum,
+          content: batchFormData.content || '常规课程',
+          date: batchFormData.date,
+          startTime: batchFormData.startTime,
+          endTime: `${endHour}:00`,
+        };
+      });
+
+      batchAddLessons(lessonData);
+
+      setShowAddModal(false);
+      resetForm();
+    }
+  };
+
+  const resetForm = () => {
     setFormData({
       studentId: '',
       course: '',
@@ -136,20 +227,49 @@ export default function Lessons() {
       content: '',
       startTime: '09:00',
     });
+    setBatchFormData({
+      course: '',
+      date: formatDate(new Date()),
+      hours: '1',
+      teacher: '',
+      content: '',
+      startTime: '09:00',
+    });
+    setSelectedStudentIds([]);
     setErrors({});
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }));
+    if (mode === 'single') {
+      setFormData(prev => ({ ...prev, [field]: value }));
+      if (errors[field]) {
+        setErrors(prev => ({ ...prev, [field]: '' }));
+      }
+      if (field === 'studentId') {
+        setFormData(prev => ({ ...prev, course: '', teacher: '' }));
+      }
+      if (field === 'course') {
+        setFormData(prev => ({ ...prev, teacher: '' }));
+      }
+    } else {
+      setBatchFormData(prev => ({ ...prev, [field]: value }));
+      if (errors[field]) {
+        setErrors(prev => ({ ...prev, [field]: '' }));
+      }
+      if (field === 'course') {
+        setBatchFormData(prev => ({ ...prev, teacher: '' }));
+        const studentsInCourse = students.filter(s => 
+          s.status === 'active' && 
+          s.courseHours?.[value]?.remaining > 0
+        );
+        setSelectedStudentIds(studentsInCourse.map(s => s.id));
+      }
     }
-    if (field === 'studentId') {
-      setFormData(prev => ({ ...prev, course: '', teacher: '' }));
-    }
-    if (field === 'course') {
-      setFormData(prev => ({ ...prev, teacher: '' }));
-    }
+  };
+
+  const handleOpenModal = () => {
+    resetForm();
+    setShowAddModal(true);
   };
 
   return (
@@ -212,7 +332,7 @@ export default function Lessons() {
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenModal}
           className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-medium shadow-lg shadow-orange-500/25 hover:shadow-xl transition-all"
         >
           <Plus className="w-5 h-5" />
@@ -311,138 +431,321 @@ export default function Lessons() {
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <h3 className="text-lg font-semibold text-gray-800">记录课时</h3>
               <button
-                onClick={() => { setShowAddModal(false); setErrors({}); }}
+                onClick={() => { setShowAddModal(false); resetForm(); }}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">选择学员 <span className="text-red-500">*</span></label>
-                <select
-                  value={formData.studentId}
-                  onChange={(e) => handleInputChange('studentId', e.target.value)}
-                  className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
-                    errors.studentId ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
-                >
-                  <option value="">请选择学员（仅显示有剩余课时的）</option>
-                  {studentsWithHours.map((student) => (
-                    <option key={student.id} value={student.id}>
-                      {student.name} - 剩余{student.remainingHours}课时
-                    </option>
-                  ))}
-                </select>
-                {errors.studentId && <p className="text-xs text-red-500 mt-1">{errors.studentId}</p>}
-              </div>
+            <div className="flex border-b border-gray-100">
+              <button
+                onClick={() => { setMode('single'); setErrors({}); }}
+                className={cn(
+                  'flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                  mode === 'single'
+                    ? 'text-orange-600 border-b-2 border-orange-500 bg-orange-50/50'
+                    : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <User className="w-4 h-4" />
+                单个记录
+              </button>
+              <button
+                onClick={() => { setMode('batch'); setErrors({}); }}
+                className={cn(
+                  'flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                  mode === 'batch'
+                    ? 'text-orange-600 border-b-2 border-orange-500 bg-orange-50/50'
+                    : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Users className="w-4 h-4" />
+                批量记录
+              </button>
+            </div>
 
-              {selectedStudent && (
-                <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
-                  <p className="text-sm text-gray-600">
-                    已选学员：<span className="font-medium text-gray-800">{selectedStudent.name}</span>
-                    <span className="text-gray-400 mx-2">|</span>
-                    总剩余：<span className="font-medium text-orange-600">{selectedStudent.remainingHours} 课时</span>
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">选择课程 <span className="text-red-500">*</span></label>
-                <select
-                  value={formData.course}
-                  onChange={(e) => handleInputChange('course', e.target.value)}
-                  disabled={!formData.studentId}
-                  className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100 disabled:cursor-not-allowed',
-                    errors.course ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
-                >
-                  <option value="">请选择课程</option>
-                  {studentCourses.map((course) => (
-                    <option key={course} value={course}>
-                      {course}（剩余{selectedStudent?.courseHours?.[course]?.remaining || 0}课时）
-                    </option>
-                  ))}
-                </select>
-                {errors.course && <p className="text-xs text-red-500 mt-1">{errors.course}</p>}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+            {mode === 'single' ? (
+              <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">上课日期 <span className="text-red-500">*</span></label>
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => handleInputChange('date', e.target.value)}
-                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
-                      errors.date ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
-                  />
-                  {errors.date && <p className="text-xs text-red-500 mt-1">{errors.date}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">开始时间</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">选择学员 <span className="text-red-500">*</span></label>
                   <select
-                    value={formData.startTime}
-                    onChange={(e) => handleInputChange('startTime', e.target.value)}
+                    value={formData.studentId}
+                    onChange={(e) => handleInputChange('studentId', e.target.value)}
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                      errors.studentId ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                  >
+                    <option value="">请选择学员（仅显示有剩余课时的）</option>
+                    {studentsWithHours.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} - 剩余{student.remainingHours}课时
+                      </option>
+                    ))}
+                  </select>
+                  {errors.studentId && <p className="text-xs text-red-500 mt-1">{errors.studentId}</p>}
+                </div>
+
+                {selectedStudent && (
+                  <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+                    <p className="text-sm text-gray-600">
+                      已选学员：<span className="font-medium text-gray-800">{selectedStudent.name}</span>
+                      <span className="text-gray-400 mx-2">|</span>
+                      总剩余：<span className="font-medium text-orange-600">{selectedStudent.remainingHours} 课时</span>
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">选择课程 <span className="text-red-500">*</span></label>
+                  <select
+                    value={formData.course}
+                    onChange={(e) => handleInputChange('course', e.target.value)}
+                    disabled={!formData.studentId}
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100 disabled:cursor-not-allowed',
+                      errors.course ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                  >
+                    <option value="">请选择课程</option>
+                    {studentCourses.map((course) => (
+                      <option key={course} value={course}>
+                        {course}（剩余{selectedStudent?.courseHours?.[course]?.remaining || 0}课时）
+                      </option>
+                    ))}
+                  </select>
+                  {errors.course && <p className="text-xs text-red-500 mt-1">{errors.course}</p>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">上课日期 <span className="text-red-500">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => handleInputChange('date', e.target.value)}
+                      className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                        errors.date ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                    />
+                    {errors.date && <p className="text-xs text-red-500 mt-1">{errors.date}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">开始时间</label>
+                    <select
+                      value={formData.startTime}
+                      onChange={(e) => handleInputChange('startTime', e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    >
+                      {['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'].map((time) => (
+                        <option key={time} value={time}>{time}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">消耗课时数 <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    value={formData.hours}
+                    onChange={(e) => handleInputChange('hours', e.target.value)}
+                    placeholder="请输入消耗课时数"
+                    className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
+                      errors.hours ? 'border-red-500 focus:ring-red-500 bg-red-50' : 'border-gray-200')}
+                  />
+                  {errors.hours && <p className="text-xs text-red-500 mt-1">{errors.hours}</p>}
+                  {formData.course && selectedStudent && !errors.hours && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      该课程剩余课时：<span className="font-medium text-orange-600">{remainingHoursForCourse}</span> 课时
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">授课老师</label>
+                  <select
+                    value={formData.teacher}
+                    onChange={(e) => handleInputChange('teacher', e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
-                    {['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'].map((time) => (
-                      <option key={time} value={time}>{time}</option>
+                    <option value="">请选择老师（可选）</option>
+                    {courseTeachers.map((teacher) => (
+                      <option key={teacher.id} value={teacher.name}>{teacher.name}</option>
                     ))}
                   </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">消耗课时数 <span className="text-red-500">*</span></label>
-                <input
-                  type="number"
-                  value={formData.hours}
-                  onChange={(e) => handleInputChange('hours', e.target.value)}
-                  placeholder="请输入消耗课时数"
-                  className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent',
-                    errors.hours ? 'border-red-500 focus:ring-red-500 bg-red-50' : 'border-gray-200')}
-                />
-                {errors.hours && <p className="text-xs text-red-500 mt-1">{errors.hours}</p>}
-                {formData.course && selectedStudent && !errors.hours && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    该课程剩余课时：<span className="font-medium text-orange-600">{remainingHoursForCourse}</span> 课时
-                  </p>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">课程内容</label>
+                  <input
+                    type="text"
+                    value={formData.content}
+                    onChange={(e) => handleInputChange('content', e.target.value)}
+                    placeholder="请输入课程内容（选填）"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                </div>
               </div>
+            ) : (
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">选择课程 <span className="text-red-500">*</span></label>
+                    <select
+                      value={batchFormData.course}
+                      onChange={(e) => handleInputChange('course', e.target.value)}
+                      className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                        errors.course ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                    >
+                      <option value="">请选择课程</option>
+                      {COURSE_LIST.map((course) => (
+                        <option key={course} value={course}>{course}</option>
+                      ))}
+                    </select>
+                    {errors.course && <p className="text-xs text-red-500 mt-1">{errors.course}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">上课日期 <span className="text-red-500">*</span></label>
+                    <input
+                      type="date"
+                      value={batchFormData.date}
+                      onChange={(e) => handleInputChange('date', e.target.value)}
+                      className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                        errors.date ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                    />
+                    {errors.date && <p className="text-xs text-red-500 mt-1">{errors.date}</p>}
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">授课老师</label>
-                <select
-                  value={formData.teacher}
-                  onChange={(e) => handleInputChange('teacher', e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                >
-                  <option value="">请选择老师（可选）</option>
-                  {courseTeachers.map((teacher) => (
-                    <option key={teacher.id} value={teacher.name}>{teacher.name}</option>
-                  ))}
-                </select>
-              </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">消耗课时 <span className="text-red-500">*</span></label>
+                    <input
+                      type="number"
+                      value={batchFormData.hours}
+                      onChange={(e) => handleInputChange('hours', e.target.value)}
+                      className={cn('w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+                        errors.hours ? 'border-red-300 focus:ring-red-500' : 'border-gray-200')}
+                    />
+                    {errors.hours && <p className="text-xs text-red-500 mt-1">{errors.hours}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">开始时间</label>
+                    <select
+                      value={batchFormData.startTime}
+                      onChange={(e) => handleInputChange('startTime', e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    >
+                      {['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'].map((time) => (
+                        <option key={time} value={time}>{time}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">授课老师</label>
+                    <select
+                      value={batchFormData.teacher}
+                      onChange={(e) => handleInputChange('teacher', e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    >
+                      <option value="">请选择老师</option>
+                      {courseTeachers.map((teacher) => (
+                        <option key={teacher.id} value={teacher.name}>{teacher.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">课程内容</label>
-                <input
-                  type="text"
-                  value={formData.content}
-                  onChange={(e) => handleInputChange('content', e.target.value)}
-                  placeholder="请输入课程内容（选填）"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">课程内容</label>
+                  <input
+                    type="text"
+                    value={batchFormData.content}
+                    onChange={(e) => handleInputChange('content', e.target.value)}
+                    placeholder="请输入课程内容（选填）"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="border-t border-gray-100 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-orange-500" />
+                      <span className="text-sm font-medium text-gray-700">
+                        选择学员 <span className="text-red-500">*</span>
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        （共 {batchStudents.length} 名学员有剩余课时）
+                      </span>
+                    </div>
+                    <button
+                      onClick={selectAllStudents}
+                      disabled={!batchFormData.course}
+                      className="text-xs text-orange-600 hover:text-orange-700 disabled:text-gray-400 disabled:cursor-not-allowed font-medium"
+                    >
+                      {selectedStudentIds.length === batchStudents.length && batchStudents.length > 0 ? '取消全选' : '全选'}
+                    </button>
+                  </div>
+                  {errors.students && <p className="text-xs text-red-500 mb-2">{errors.students}</p>}
+                  
+                  {batchFormData.course ? (
+                    <div className="border border-gray-200 rounded-xl max-h-64 overflow-y-auto">
+                      {batchStudents.length > 0 ? (
+                        <div className="divide-y divide-gray-50">
+                          {batchStudents.map((student) => (
+                            <div
+                              key={student.id}
+                              onClick={() => toggleStudent(student.id)}
+                              className={cn(
+                                'flex items-center justify-between px-4 py-3 cursor-pointer transition-colors',
+                                selectedStudentIds.includes(student.id)
+                                  ? 'bg-orange-50 hover:bg-orange-100/50'
+                                  : 'hover:bg-gray-50'
+                              )}
+                            >
+                              <div className="flex items-center gap-3">
+                                {selectedStudentIds.includes(student.id) ? (
+                                  <CheckSquare className="w-5 h-5 text-orange-500" />
+                                ) : (
+                                  <Square className="w-5 h-5 text-gray-300" />
+                                )}
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-xs font-medium">
+                                  {student.name.charAt(0)}
+                                </div>
+                                <span className="font-medium text-gray-800">{student.name}</span>
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                剩余 <span className="font-medium text-orange-600">{student.courseHours?.[batchFormData.course]?.remaining || 0}</span> 课时
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="py-8 text-center text-gray-400 text-sm">
+                          该课程暂无有剩余课时的学员
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="border border-dashed border-gray-200 rounded-xl py-8 text-center text-gray-400 text-sm">
+                      请先选择课程
+                    </div>
+                  )}
+                  
+                  {batchFormData.course && batchStudents.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      已选择 <span className="font-medium text-orange-600">{selectedStudentIds.length}</span> 名学员，
+                      预计消耗 <span className="font-medium text-orange-600">{selectedStudentIds.length * parseInt(batchFormData.hours || '0')}</span> 课时
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-100">
               <button
-                onClick={() => { setShowAddModal(false); setErrors({}); }}
+                onClick={() => { setShowAddModal(false); resetForm(); }}
                 className="px-5 py-2.5 border border-gray-200 text-gray-600 rounded-xl font-medium hover:bg-gray-50 transition-colors"
               >
                 取消
@@ -451,30 +754,12 @@ export default function Lessons() {
                 onClick={handleSubmit}
                 className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-medium shadow-lg shadow-orange-500/25 hover:shadow-xl transition-all"
               >
-                确认提交
+                {mode === 'single' ? '确认提交' : `批量提交 (${selectedStudentIds.length}人)`}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-import { LucideIcon } from 'lucide-react';
-
-function StatCard({ title, value, icon: Icon, color }: { title: string; value: string; icon: LucideIcon; color: string }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-md p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-500">{title}</p>
-          <p className="text-2xl font-bold text-gray-800 mt-1">{value}</p>
-        </div>
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: color + '20' }}>
-          <Icon className="w-6 h-6" style={{ color }} />
-        </div>
-      </div>
     </div>
   );
 }
