@@ -71,21 +71,61 @@ export const useDataStore = create<DataState>()(
       initialized: false,
 
       initData: () => {
-        if (get().initialized) return;
-        
         const state = get();
         let needsUpdate = false;
+
         const updatedStudents = state.students.map(student => {
-          if (!student.courseHours || !student.courses) {
+          let studentNeedsUpdate = false;
+          
+          let courses = student.courses;
+          let courseHours = student.courseHours;
+          let remainingHours = student.remainingHours;
+          let totalHours = student.totalHours;
+
+          if (!courses || !courseHours) {
+            studentNeedsUpdate = true;
+            courses = courses || (student.course ? [student.course] : []);
+            courseHours = courseHours || {};
+            
+            courses.forEach(course => {
+              if (!courseHours[course]) {
+                courseHours[course] = {
+                  remaining: student.remainingHours || 0,
+                  total: student.totalHours || 0,
+                };
+              }
+            });
+          }
+
+          const courseHoursCourses = Object.keys(courseHours);
+          const allCourses = [...new Set([...courses, ...courseHoursCourses])];
+          
+          allCourses.forEach(course => {
+            if (!courseHours[course]) {
+              studentNeedsUpdate = true;
+              courseHours[course] = { remaining: 0, total: 0 };
+            }
+            if (!courses.includes(course)) {
+              studentNeedsUpdate = true;
+              courses = [...courses, course];
+            }
+          });
+
+          const calculatedRemaining = Object.values(courseHours).reduce((sum, ch) => sum + ch.remaining, 0);
+          const calculatedTotal = Object.values(courseHours).reduce((sum, ch) => sum + ch.total, 0);
+          
+          if (remainingHours !== calculatedRemaining) {
+            studentNeedsUpdate = true;
+            remainingHours = calculatedRemaining;
+          }
+          if (totalHours !== calculatedTotal) {
+            studentNeedsUpdate = true;
+            totalHours = calculatedTotal;
+          }
+
+          if (studentNeedsUpdate) {
             needsUpdate = true;
-            const courses = student.courses || [student.course];
-            const courseHours = student.courseHours || {
-              [student.course]: {
-                remaining: student.remainingHours,
-                total: student.totalHours,
-              },
-            };
-            return { ...student, courses, courseHours };
+            return { ...student, courses, courseHours, remainingHours, totalHours };
           }
           return student;
         });
@@ -105,7 +145,9 @@ export const useDataStore = create<DataState>()(
           set({ students: updatedStudents, refunds: updatedRefunds });
         }
         
-        set({ initialized: true });
+        if (!state.initialized) {
+          set({ initialized: true });
+        }
       },
 
       addStudent: (student) => {
